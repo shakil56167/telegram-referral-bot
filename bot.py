@@ -6,6 +6,7 @@ Hosted on Render.com
 
 import logging
 import sqlite3
+import os
 from contextlib import contextmanager
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -19,30 +20,30 @@ from telegram.ext import (
 )
 
 # =============================================
-# 🔧 CONFIGURATION - EDIT THESE 5 VALUES
+# 🔧 CONFIGURATION - ENVIRONMENT VARIABLES
 # =============================================
 
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 # Get from @BotFather
 
-ADMIN_USER_ID = 123456789
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "123456789"))
 # Your Telegram numeric user ID (@userinfobot)
 
-BOT_USERNAME = "YourBotUsername"
+BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername")
 # Bot username WITHOUT @ (e.g., MyReferralBot)
 
-MAIN_GROUP_INVITE_LINK = "https://t.me/+XXXXXXXXXXXXXXXX"
+MAIN_GROUP_INVITE_LINK = os.getenv("MAIN_GROUP_INVITE_LINK", "https://t.me/+XXXXXXXXXXXXXXXX")
 # Private group invite link
 
-TARGET_GROUP_CHAT_ID = -1001234567890
-# Group chat ID where bot posts videos (@getidsbot)
+TARGET_GROUP_CHAT_ID = int(os.getenv("TARGET_GROUP_CHAT_ID", "-1001234567890"))
+# Group chat ID where bot posts videos (AUTO-DETECTED from group message)
 
 # =============================================
 # SETTINGS
 # =============================================
 
-REQUIRED_INVITES = 4
-DB_PATH = "/opt/render/project/src/referral_bot.db"  # Render persistent storage path
+REQUIRED_INVITES = int(os.getenv("REQUIRED_INVITES", "4"))
+DB_PATH = os.getenv("DB_PATH", "/opt/render/project/src/referral_bot.db")
 
 POST_CAPTION = (
     "🔥 BANGLADESHI NEW COLLECTION UNLOCKED 🔐\n\n"
@@ -168,6 +169,14 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with optional referral tracking."""
     user = update.effective_user
     args = context.args
+    
+    # 🆕 AUTO-DETECT CHAT ID IF CALLED FROM GROUP
+    global TARGET_GROUP_CHAT_ID
+    if update.effective_chat.type == "supergroup":
+        chat_id = update.effective_chat.id
+        if chat_id != TARGET_GROUP_CHAT_ID:
+            TARGET_GROUP_CHAT_ID = chat_id
+            logger.info("✅ Auto-detected group Chat ID: %s", chat_id)
 
     referrer_id = None
     if args:
@@ -273,8 +282,26 @@ async def post_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error("Failed to post video: %s", exc)
         await message.reply_text(
             f"❌ পোস্ট করতে ব্যর্থ হয়েছে।\n\nError: {exc}\n\n"
-            "নিশ্চিত করুন বটটি গ্রুপের অ্যাডমিন এবং TARGET_GROUP_CHAT_ID সঠিক।"
+            "নিশ্চিত করুন বটটি গ্রুপের অ্যাডমিন।"
         )
+
+
+async def get_chat_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /chatid command - Show current chat ID."""
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+
+    current_chat_id = update.effective_chat.id
+    
+    text = (
+        f"📊 *Chat Information*\n\n"
+        f"💬 Current Chat ID: `{current_chat_id}`\n"
+        f"📍 Saved TARGET_GROUP_CHAT_ID: `{TARGET_GROUP_CHAT_ID}`\n\n"
+        f"ℹ️ এটি আপনার `TARGET_GROUP_CHAT_ID` এর জন্য:\n"
+        f"`TARGET_GROUP_CHAT_ID={current_chat_id}`"
+    )
+    
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -314,12 +341,14 @@ def main():
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("post", post_handler))
     app.add_handler(CommandHandler("stats", stats_handler))
+    app.add_handler(CommandHandler("chatid", get_chat_id_handler))
     app.add_handler(CallbackQueryHandler(access_callback, pattern=r"^access:\d+$"))
     app.add_handler(
         MessageHandler(filters.VIDEO & filters.User(ADMIN_USER_ID), post_handler)
     )
 
     logger.info("Bot is running on Render.com...")
+    logger.info("✅ Auto-detect Chat ID enabled!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
